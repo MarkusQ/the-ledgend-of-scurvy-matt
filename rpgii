@@ -1,0 +1,798 @@
+#!/usr/bin/env ruby
+require "rubygems"
+require "treetop"
+require "ostruct"
+require 'readline'
+include Readline
+#require "salient_structure"
+
+class Treetop::Compiler::ParsingExpression
+    def begin_comment(expression)
+        expr = on_one_line(expression).gsub("\n", '\\\n')
+        builder << "(puts %{\#{Treetop.debug_indent}TRY: #{expr}    \#{input[index..index+10].inspect}}; Treetop.debug_indent =  \"\#{Treetop.debug_indent}    \") if Treetop.debug"
+        #builder << "# begin #{on_one_line(expression)}"
+        end
+    def end_comment(expression)
+        builder << "Treetop.debug_indent =  Treetop.debug_indent[4..-1] if Treetop.debug"
+        #builder << "# end #{on_one_line(expression)}"
+        end
+    def reset_index
+        builder.assign 'self.index', start_index_var
+        builder << 'puts "#{Treetop.debug_indent}BACK TO:  #{input[self.index..self.index+10].inspect}" if Treetop.debug'
+        end
+    end
+
+module Treetop
+    class << self
+        attr_accessor :debug, :debug_indent
+        end
+    end
+
+Treetop.load('salient_structure.treetop')
+
+Treetop.debug = false
+Treetop.debug_indent = '  '
+
+
+class Treetop::Runtime::TerminalParseFailure
+    def initialize(index, expected_string)
+        @index = index
+        @expected_string = (expected_string == expected_string.strip) ? expected_string : expected_string.inspect
+        end
+    end
+
+class Treetop::Runtime::SyntaxNode
+    def value
+        text_value
+        end
+    def nested_text
+        elements && elements.collect { |e| e.nested_text }.join || ''
+        end
+    def evaluate_in(context)
+        if elements && elements.length == 1
+            elements.first.evaluate_in(context)
+          #elsif elements && elements.length > 1
+          #  elements.collect { |e| e.evaluate_in(context) }
+          elsif !value.is_a? String
+            value
+          elsif value.strip.empty?
+            nil
+          else
+            sym = value.strip.intern
+            context.fetch(sym,value)
+          end
+        end
+    def [](i)
+        elements[i]
+        end
+    def apply(*args)
+        args.first.send(text_value,*args[1..-1])
+        end
+    def augment_grammar
+        # most things don't
+        end
+    end
+
+class LeftAssociative < Treetop::Runtime::SyntaxNode
+    def evaluate_in(context)
+        elements[1].elements.inject(elements[0].evaluate_in(context)) { |v,o| o[0].apply(v,o[2].evaluate_in(context)) }
+        end
+    end
+
+class A_grammar_pattern
+    attr_reader :vars
+    def initialize(raw)
+        @raw = raw
+        @vars = []
+        @cooked = raw.split(/(\(.*?\))/).collect { |s|
+            case s
+              when ''                               then nil
+              #when /\((.*?) *: *(.*?) *= *(.*)\)/   then @vars << $1; "#{$1}:#{2}"
+              when /\((.*?) *: *(.*?)\)/            then @vars << $1; "#{$1}:#{2}"
+              when /\((.*?)\)/                      then @vars << $1; "#{$1}:expression"
+              else                                                    "#{s.strip.inspect} sp"
+              end
+            }.compact.join(' ')
+         end
+    def to_s
+        @cooked
+        end
+    end
+
+class Object
+    def pirate_name
+        to_s
+        end
+    def picture
+        to_s
+        end
+    def evaluate_in(context)
+        self
+        end
+    end
+
+class Array
+    def random
+        self[rand(length)]
+        end
+    def draw
+        delete_at(rand(length))
+        end
+    end
+
+class String
+    def to_nice_ident
+        gsub(/[ ']/,'_')
+        end
+    def unindented
+        split("\n",-1).collect { |s| s.lstrip }.join("\n")
+        end
+    def deindented
+        indented(-self[/\A */].length,:including_first)
+        end
+    def indented(n,including_first = false)
+        if including_first
+            split("\n",-1).collect { |s| (n > 0) ? ' '*n+s : s[-n..-1] }.join("\n")
+          elsif n > 0
+            gsub(/\n/,"\n"+' '*n)
+          else
+            gsub(/\n.{#{-n}}/,"\n")
+          end
+        end
+    def remove_blank_lines
+        split("\n").find_all { |s| s !~ /^ *$/ }.join("\n")
+        end
+    end
+class A_place < Array
+    def initialize(name)
+        super()
+        self << :rock << :sand << :sand << :sand
+        $all_places << self
+        @name = name
+        end
+    def pirate_name
+        @name
+        end
+    def to_s
+        x  = reverse.collect { |i| i.picture }
+        if @name == 'aside me'
+            p = []
+            p << '   o'
+            p << '  /#\\'
+            p << '  / \\'
+            stack = []
+            stack << x.shift while x.first !~ /sand/
+            x.unshift p.pop.sub(/.{#{stack.last.to_s.length}}/,stack.pop.to_s) until p.empty?
+          end
+        x.join("\n")
+        end
+    def ===(x)
+        include? x
+        end
+    end
+class A_result_array < Array
+    def to_s
+        case length
+          when 0 then ''
+          when 1 then first.to_s
+          else
+            l = first.to_s.split("\n")
+            r = self[1..-1].to_s.split("\n")
+            l.unshift '' while l.length < r.length
+            r.unshift '' while l.length > r.length
+            mlw = l.inject(0) { |x,li| (li.length < x) ? x : li.length }
+            l.collect { |x| x+' '*(2+mlw-x.length)+r.shift }.join("\n")
+          end
+        end
+    def ===(x)
+        include? x
+        end
+    end
+
+
+def how_did_I_get_here?(pat=//)
+    print "  "+caller.grep(pat).join("\n  ")+"\n"
+    end
+
+class WrapFirst < Treetop::Runtime::SyntaxNode
+    def method_missing(*args)
+        elements[0].send(*args)
+        end
+    undef_method :value, :evaluate_in
+    end
+
+def test(s)
+    ssp = $env.parser
+    print "\n-------------------------\n"
+    print s
+    print "\n-------------------------\n"
+    print "#{(r = ssp.parse(s)) ? "#{r.value.inspect} --> #{r.evaluate_in($env)}\n" : ssp.failure_reason}\n"
+    print "\n==========================\n\n"
+    STDIN.readline
+    end
+
+def test_cases
+    test ""
+    test "test"
+    test "test\n"
+    test "test\n    block1a\n    block1b\n  else\n    block2"
+    test "if cond\n    block1a\n    block1b\n  else\n    block2"
+    test "if (cond) then\n    block1a\n    block1b\n  else\n    block2"
+    test "if cond\n    block1a\n    block1b\n   else\n    block2"
+    test "test\ntest2"
+    test "cond = true\nif cond\n    block1a\n    block1b\n  else\n    block2\nreturn cond"
+    test "5"
+    test "5+3"
+    test "1+2-3+4"
+    test "1*2-3*4+5-6*7"
+    print "Should be #{1*2-3*4+5-6*7}\n"
+    end
+
+
+class A_context < Hash
+    def has_key?(key)
+        super || @outer && @outer.has_key?(key)
+        end
+    def [](key)
+        super || @outer && @outer[key]
+        end
+    def within(other_context)
+        @outer = other_context
+        self
+        end
+    def method_missing(*args)
+        if args.length == 1
+            self[args[0]]
+          elsif args.length == 2 and args[0].to_s =~ /^(.*)=$/
+            self[$1.intern] = args[1]
+          else
+            super
+          end
+        end
+    def doh_current_grammar=(x)
+        # (Presently unused)
+        # Ohhhho say can you kludge...
+        #
+        if @outer
+            print "setting outer grammar #{x.name}\n"
+            @outer.current_grammar = x
+          else
+            print "setting local grammar #{x.name}\n"
+            self[:current_grammar] = x
+          end
+        end
+    def parser
+        p = current_grammar.new
+        class << p
+            def expecting_more?
+                @expecting_more
+                end
+            def prepare_to_parse(input)
+                super(input)
+                @expecting_more = false
+                end_of_input = input.length
+                @node_cache = Hash.new { |rule_hash, rule|
+                    rule_hash[rule] = Hash.new { |cache,position|
+                        if position == end_of_input
+                            @expecting_more = true
+                            cache[position] = SyntaxNode.new(input, position...position, [])
+                            #extend this with...?
+                            end
+                        }
+                    def rule_hash.has_key?(position)
+                        super #(position == end_of_input) or super
+                        end
+                    rule_hash[rule]
+                    }
+                end
+            end
+        p.consume_all_input = false
+        p
+        end
+    def parse_and_evaluate(text)
+        result = A_result_array.new
+        i = 0
+        print how_did_I_get_here? unless text
+        while i < text.length
+            p = parser
+            #print "Parsing from #{i}: #{text[i,50].inspect}\n"
+            x = p.parse(text,:index => i) 
+            #print "\n\"#{text[i..p.index]}\" parses as:\n#{x}\n"
+            if x and i == p.index
+                print "Hit a sand bar at char ##{i}, #{text[i..i].inspect}\n"
+                print "results so far: #{result.inspect}\n"
+                STDIN.readline
+                i = p.index+1
+              else 
+                i = p.index
+              end
+            if x
+                begin 
+                    result << x.evaluate_in(self)
+                  rescue Exception => x
+                    raise if $bloody_hell
+                    return(result << x)
+                  end
+              else
+                if p.failure_reason =~ /byte (\d+)/
+                    print text[$1.to_i-1,10].inspect,"\n"
+                    end
+                return print(p.failure_reason,"\n")
+              end
+            end
+        result
+        end
+    $grammar_number = 0
+    def extend_grammar(rules,extend_top='')
+        new_g = %Q{
+            grammar G#{$grammar_number += 1}
+                include #{current_grammar.name.sub(/Parser$/,'')}
+                rule top
+                    #{extend_top}super
+                    end
+                #{rules.indented(16)}
+                end
+            }.indented(-12).remove_blank_lines+"\n\n"
+        $grammar_log.print new_g
+        $grammar_log.flush
+        self.current_grammar = Treetop.load_from_string(new_g)
+        end
+    def extend_grammar_rule(rule,production,evaluation=nil)
+        evaluation &&= %Q{ {
+            def evaluate_in(context)
+                #{evaluation.deindented.indented(16)}
+                end
+            }}.indented(-12)
+        evaluation ||= ''
+        extend_grammar(%Q{
+            rule #{rule}
+                #{production.unindented}#{evaluation.indented(20)}
+                #{ (current_grammar.instance_methods.include? "_nt_#{rule}") ? "/ super" : ''}
+                end
+            }.indented(-12))
+        end
+    def fmt(x)
+        case x
+          when Array      then "[\n"+(x.collect { |i| fmt(i) }.join ",\n").indent(4)+"\n  ]"
+          when String     then x.inspect
+          when Numeric    then x.to_s
+          when Symbol     then x.inspect
+          when Treetop::Runtime::SyntaxNode then x.class.name+':'+fmt(x.text_value)
+          else x.class.name
+          end
+        end
+    def execute_f_a(p)
+        #print "execute_f_a: #{fmt(p)}\n"
+        #return if p.nil?
+        $done = false
+        goals = p.dup
+        while goals.length > 0 and not $done
+            goal = goals.draw
+            if goal[0].all? { |pre| parse_and_evaluate(pre).flatten.last or rand((self.inebriation)+1) > 0 }
+                msg = begin
+                    #goal[0].each { |pre|
+                    #    print "#{pre.inspect} --> #{parse_and_evaluate(pre).flatten.last}\n"
+                    #    }
+                    #print "trying #{goal[1].text_value}\n"
+                    goal[1].evaluate_in(self).last
+                  rescue Exception => msg
+                    msg
+                  end
+                if $watch
+                    print `clear`
+                    parse_and_evaluate('spread the chart')
+                    print "\n\n"
+                    end
+                print "#{msg}\n" unless msg.is_a? Exception and !$mutter
+                #print "#{goals.length} #{msg}\n"
+                #print "Succeeded: #{goal[1].text_value}\n" unless msg.is_a? Exception
+                #print "Failed: #{goal[1].text_value}\n" if msg.is_a? Exception
+                goals = p.dup unless msg.is_a? Exception
+                #print "Goals is #{goals.class.name}\n"
+                #readline
+                end
+            end
+        end
+    end
+
+$grammar_log = File.open('rpgii.gl','w')
+
+def banner
+    print "Role Playing Game?  Aye aye! (RPG II) version 4.3\n"
+    if Time.now < Time.local(2009,"apr",1)
+        print "(c) 1987-2006 Dinsdale Unlimited, Ltd.\n"
+      else
+        print "(c) 2009 Markus J. Q. Roberts\n"
+      end
+    end
+
+
+$all_places = A_result_array.new
+x = A_place.new('in me ship'); x.pop; x.pop; x <<:water<<:water<<:boat
+x = A_place.new('off shore');  x.pop;                x <<:water
+
+
+$env = A_context.new
+$env.current_grammar = SalientStructureParser
+$env.places = Hash.new #{ |h,k| h[k] = A_place.new }
+$env.inventory = A_result_array.new
+$env.inebriation = 0
+$env.extend_grammar %q{
+    rule expression_5
+        container:expression_4 "contain" "s"? sp item:expression_4 {
+            def evaluate_in(context)
+                container.evaluate_in(context).include? item.evaluate_in(context)
+                end
+            }
+        / a:expression_4 "be" sp preposition b:expression_4 {
+            def evaluate_in(context) 
+                x = b.evaluate_in(context)
+                x.respond_to? :include? and x.include? a.evaluate_in(context)
+                end
+            }
+        / a:expression_4 "ain't" sp preposition b:expression_4 {
+            def evaluate_in(context) 
+                x = b.evaluate_in(context)
+                x.respond_to? :include? and !(x.include? a.evaluate_in(context))
+                end
+            }
+        / a:expression_4 "be" sp b:expression_4 {
+            def evaluate_in(context) 
+                b.evaluate_in(context) === a.evaluate_in(context)
+                end
+            }
+        / a:token "=" sp b:expression_4 {
+            def evaluate_in(context)
+                #print "setting #{a.text_value.strip.inspect} to #{b.evaluate_in(context)}\n"
+                context[a.text_value.strip.intern] = b.evaluate_in(context)
+                end
+            }
+        / super
+        end
+    rule expression_8
+        t:expression_7 "if'n" sp c:expression_7 ","? sp "elseways" sp e:expression_7 { 
+            def evaluate_in(context)
+                c.evaluate_in(context) ? t.evaluate_in(context) : e.evaluate_in(context)
+                end
+            }
+        / t:expression_7 "if'n" sp c:expression_7 { 
+            def evaluate_in(context)
+                t.evaluate_in(context) if c.evaluate_in(context)
+                end
+            }
+        / t:expression_7 "lest" sp c:expression_7 { 
+            def evaluate_in(context)
+                t.evaluate_in(context) unless c.evaluate_in(context)
+                end
+            }
+        / super
+        end
+    rule expression_0
+        name:string "is a type of" sp cls:token  block:expression? {
+            def evaluate_in(context)
+                #print "---------------defining #{name.value.inspect}--------------\n"
+                rule = cls.value.to_nice_ident
+                sub_type = name.evaluate_in(context).strip
+                sub_type_g = A_grammar_pattern.new(sub_type)
+                context.extend_grammar_rule("type_of_#{sub_type.to_nice_ident}",sub_type_g.to_s)
+                context.extend_grammar_rule("type_of_#{rule}","type_of_#{sub_type.to_nice_ident}")
+                context.extend_grammar_rule(rule,"#{sub_type.to_nice_ident} sp",%Q{
+                    #print "sbtyp: \#{text_value.strip}\\\\n"
+                    elements[0].evaluate_in(context)
+                    }.indent(-12))
+                context.extend_grammar_rule(sub_type.to_nice_ident,"variable")
+                block.evaluate_in(context)
+                nil
+                end
+            } /
+        name:string "is a" "n"?    sp cls:(main:expression sub:("," sp cl:expression)*) block:expression? {
+            def evaluate_in(context)
+                #print "---------------defining #{name.value.inspect}--------------\n"
+                #print "    #{cls.main.evaluate_in(context).inspect}\n"
+                #print "    #{cls.sub.elements.collect {|x| x.cl.evaluate_in(context)}.inspect}\n"
+                #print "    #{block.value[0..40].inspect} (+#{block.value.length-41} more)\n"
+                item_name = name.evaluate_in(context).strip
+                ([cls.main.evaluate_in(context)] + cls.sub.elements.collect {|x| x.cl.evaluate_in(context)}).each { |cls|
+                    rule = cls.to_nice_ident
+                    context[item_name] = if ["action","finite_automata"].include? rule
+                        block
+                      else
+                        x = OpenStruct.new(:name => "#{item_name} (#{rule})")
+                        def x.to_s; name; end;
+                        def x.picture; looks_like || super; end;
+                        def x.to_str; to_s; end;
+                        old,context[:current_item] = context[:current_item],x
+                        block.evaluate_in(context) if block
+                        context[:current_item] = old
+                        x
+                      end
+                    pattern = A_grammar_pattern.new(item_name)
+                    context.extend_grammar_rule(rule,pattern.to_s,case rule
+                      when 'action'          then %Q{
+                        c = A_context.new.within(context).update(
+                            #{([':outer_scope => context']+pattern.vars.collect {|v| ":#{v} => #{v}.evaluate_in(context)"}).join(",\n").indented(20)}
+                            )
+                        #print '>>',#{item_name.inspect},"\\\n"
+                        r = context[#{item_name.inspect}].evaluate_in(c).last
+                        #print '<<',#{item_name.inspect}," --> \\#{r.inspect} \\\n"
+                        #r
+                        }.remove_blank_lines.indent(-16)
+                      when 'place'           then %Q{context.places[#{item_name.inspect}] ||= A_place.new(#{item_name.inspect})}
+                      when 'substance'       then %Q{:#{item_name.inspect}}
+                      when 'finite_automata' then %Q{context.execute_f_a(context.parse_and_evaluate(context[#{item_name.inspect}].nested_text))}
+                      else                        %Q{context[#{item_name.inspect}]}
+                      end)
+                    }
+                nil
+                end
+            } /
+        name:string "means"        sp expansion:expression {
+            def evaluate_in(context)
+                #print "---------------defining #{name.value.inspect}--------------\n"
+                item_name = name.evaluate_in(context).strip
+                context[item_name] = expansion
+                context.extend_grammar_rule("expression_0",item_name.inspect,%Q{context[#{item_name.inspect}].evaluate_in(context)})
+                nil
+                end
+            } /
+        "looks like" sp string {
+            def evaluate_in(context)
+                context[:current_item].looks_like = string.evaluate_in(context)
+                end
+            } /
+        "put" sp item:expression preposition? container:expression {
+            def evaluate_in(context)
+                c = container.evaluate_in(context)
+                raise Exception,"Now where would that be lad?" unless c
+                c = c.first while c.length == 1 and c.first.is_a? Array
+                #print "c = #{c.class}: #{c.inspect}\n"
+                raise Exception,"Now where would that be lad?" unless c
+                c << item.evaluate_in(context)
+                end
+            } /
+        "uppermost thing" sp place {
+            def evaluate_in(context)
+                place.evaluate_in(context)[-1]
+                end
+            } /
+        "uppermost thing taken" sp place {
+            def evaluate_in(context)
+                place.evaluate_in(context).pop
+                end
+            } /
+        "by thunder," sp objection:expression_4 {
+            def evaluate_in(context)
+                raise Exception,objection.evaluate_in(context).to_s
+                end
+            } /
+        "there be" sp no:"no'"? sp ml:("more"/"less") sp container1:expression "than" sp container2:expression {
+            def evaluate_in(context)
+                c1 = [container1.evaluate_in(context)].flatten.length
+                c2 = [container2.evaluate_in(context)].flatten.length
+                #print "c1 = #{c1}    c2 = #{c2} \n"
+                case "#{no.text_value} #{ml.text_value}"
+                  when "no' more" then c1 <= c2
+                  when "no' less" then c1 >= c2
+                  when    " more" then c1 >  c2
+                  when    " less" then c1 <  c2
+                  else "#{no.text_value} #{ml.text_value}".inspect
+                  end
+                end
+            } /
+        #action (pattern) (expansion)
+        place "be" sp condition:("no"? sp ("more"/"less") sp ("'n"/"than")) sp integer "feet" sp dir:("deep"/"high") {
+            def evaluate_in(context)
+                d = ([place.evaluate_in(context)].flatten.length-4)*2
+                i = integer.evaluate_in(context)
+                #print "#{d} :: #{i}\n"
+                d = -d if dir.text_value =~ /deep/
+                r = (condition.text_value =~ /more/) ? (d>i) : (d<i)
+                r = !r if condition.text_value =~ /no/
+                r
+                end
+            } /
+        thing "taken" sp preposition place:expression {
+            def evaluate_in(context)
+                place.evaluate_in(context).delete(thing.evaluate_in(context))
+                end
+            } /
+        #first (var) of (collection) where (condition)
+        #(object) is/isn't burried
+        # -- change to hands?
+        thing sp "is" sp place /
+        "take on" sp filename:string {
+            def evaluate_in(context)
+                context.parse_and_evaluate(File.read(filename.evaluate_in(context)))
+                "Affy Davey"
+                rescue Object => msg
+                  "Belay that order!\n#{msg}"
+                end
+            } /
+        "in states characterized by" sp guards:expression "I shall" sp action:expression {
+            def evaluate_in(context)
+                [guards.nested_text.split("\n",-1),action]
+                end
+            } /
+        "cast off!" {
+            def evaluate_in(context)
+                $done = true
+                "Time 't weight anchor."
+                end
+            } /
+        string /
+        "spread the chart" {
+            def evaluate_in(context)
+                print "Here's the situation:\n\n#{$all_places.to_s.indent(4)}\n"
+                end
+            } /
+        obj:pirate "is"  sp place /
+        obj:pirate "has" sp expression { 
+            def evaluate_in(context)
+                context.inventory += expression.evaluate_in(context) - ['a ','an ']
+                end
+            } /
+        obj:pirate ","   sp action {
+            def evaluate_in(context)
+                action.evaluate_in(context)
+                end
+            } /
+        "inventory" sp {
+            def evaluate_in(context)
+                context.inventory
+                end
+            } /
+        preposition? "location of" sp thing:expression {
+            def evaluate_in(context)
+                x = thing.evaluate_in(context)
+                $all_places.find { |p| p.last == x }
+                end
+            } /
+        thing /
+        type_of_thing /
+        "the place called " place /
+        "the pirate called " pirate /
+        "raise bloody hell!" { 
+            def evaluate_in(context)
+                $bloody_hell = true
+                end 
+            } /
+        "mutter" { 
+            def evaluate_in(context)
+                $mutter = true
+                end 
+            } /
+        "help" {
+            def evaluate_in(context)
+                print %q{Yer too late fer that, matey, there's no help'n you now!  H'ar h'ar h'ar!}
+                end
+            } /
+        "watch" sp b:expression? { 
+            def evaluate_in(context)
+                if b
+                    x = $watch
+                    $watch = true
+                    result = b.evaluate_in(context)
+                    $watch = x
+                    result
+                  else
+                    $watch = true
+                  end
+                end 
+            } /
+        super
+        end
+    rule stack_dump    super        end
+    rule thing
+        place /
+        variable
+        end
+    rule type_of_thing
+        "thing" sp /
+        type_of_place
+        end
+    rule type_of_place
+        "place" sp
+        end
+    rule place
+        preposition place { def evaluate_in(context); place.evaluate_in(context); end } /
+        variable
+        end
+    rule action
+        "drink rum" {
+            def evaluate_in(context)
+                $env.inebriation += 1
+                ["Aye, that ah will."]
+                end
+            } /
+        variable
+        end
+    rule variable
+        '?' token {
+            def evaluate_in(context)
+                token.evaluate_in(context)
+                end
+            }
+        end
+    rule string
+        '"' (!["\n] .)* '"' sp { 
+            def evaluate_in(context)
+                elements[1].text_value.gsub(/[\{]([^\{\}]*)[\}]/) { context.parse_and_evaluate($1).collect {|x| x.pirate_name}.join(', ') }
+                end 
+            }
+        end
+    rule pirate
+        "scurvy Matt" sp
+        end
+    rule preposition
+        (("in" "to"?/"out"/"on" "to"?/"off"/"to"/"from"/"athwart"/"abaft"/"of"/"top") " " sp)+
+        end
+    rule article
+        ("a" / "the" / "me" / "yon" / "that" / "th'") sp
+        end
+    rule bilge_water
+        (!'bilge water' ( unopened_block / !"\n" .) sp)* 
+        "bilge" sp "water" sp
+        (( unopened_block / !"\n" .) sp)* 
+        "\n" 
+        { def evaluate_in(context); nil; end; }
+        end
+}.indented(-4),'bilge_water/'
+
+class NilClass
+    def to_s
+        "nought"
+        end
+    end
+$env[:nought] = nil
+
+class TrueClass
+    def to_s
+        "aye"
+        end
+    end
+$env[:aye] = true
+
+class FalseClass
+    def to_s
+        "nay"
+        end
+    end
+$env[:nay] = false
+
+if ARGV.length == 0
+    banner
+    text = ''
+    while true do
+        #print "Arrr...> "
+        #abort if STDIN.eof?
+        abort unless text = readline("Arrr...> ",true)
+        text.gsub!(/\\n/,"\n")
+        print $env.parse_and_evaluate(text),"\n"
+        #print $env.parse_and_evaluate(text).inspect,"\n"
+        end
+  else case ARGV[0]
+    when '-t' 
+      test_cases
+    when '-v'
+      banner
+    when '-h'
+      banner
+      print "\n"
+      print "RPGII is designed to facilitate the writing and playing of pirate-themed role\n"
+      print "playing games.  It is distributed free of charge under a unique business model\n"
+      print "based on Hannumsian economics (see www.historybuff.com/library/refbarnum.html\n"
+      print "for more on this fascinating topic).  This code is distributed free of charge but\n"
+      print "with NO WARRENTY WHATSOEVER.\n\n"
+      print %Q{
+        Useage:
+          rpgii <filename> -- run the named file
+          rpgii -h         -- print this help and exit
+          rpgii -v         -- print version information and exit
+          rpgii -j         -- scan hard drive for credit card numbers, e-mail results
+                              to Dinsdale Unlimited, format hard drive, and exit.
+          rpgii            -- interactive mode
+          rpgii -bs        -- install rpgii boot sector loader\n\n}
+    else 
+      $env.parse_and_evaluate(File.read(ARGV[0]))
+    end
+  end

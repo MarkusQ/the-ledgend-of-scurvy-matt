@@ -1,0 +1,1084 @@
+grammar G1
+    include SalientStructure
+    rule top
+        bilge_water/super
+        end
+    rule expression_5
+        container:expression_4 "contain" "s"? sp item:expression_4 {
+            def evaluate_in(context)
+                container.evaluate_in(context).include? item.evaluate_in(context)
+                end
+            }
+        / a:expression_4 "be" sp preposition b:expression_4 {
+            def evaluate_in(context) 
+                x = b.evaluate_in(context)
+                x.respond_to? :include? and x.include? a.evaluate_in(context)
+                end
+            }
+        / a:expression_4 "ain't" sp preposition b:expression_4 {
+            def evaluate_in(context) 
+                x = b.evaluate_in(context)
+                x.respond_to? :include? and !(x.include? a.evaluate_in(context))
+                end
+            }
+        / a:expression_4 "be" sp b:expression_4 {
+            def evaluate_in(context) 
+                b.evaluate_in(context) === a.evaluate_in(context)
+                end
+            }
+        / a:token "=" sp b:expression_4 {
+            def evaluate_in(context)
+                #print "setting #{a.text_value.strip.inspect} to #{b.evaluate_in(context)}\n"
+                context[a.text_value.strip.intern] = b.evaluate_in(context)
+                end
+            }
+        / super
+        end
+    rule expression_8
+        t:expression_7 "if'n" sp c:expression_7 ","? sp "elseways" sp e:expression_7 { 
+            def evaluate_in(context)
+                c.evaluate_in(context) ? t.evaluate_in(context) : e.evaluate_in(context)
+                end
+            }
+        / t:expression_7 "if'n" sp c:expression_7 { 
+            def evaluate_in(context)
+                t.evaluate_in(context) if c.evaluate_in(context)
+                end
+            }
+        / t:expression_7 "lest" sp c:expression_7 { 
+            def evaluate_in(context)
+                t.evaluate_in(context) unless c.evaluate_in(context)
+                end
+            }
+        / super
+        end
+    rule expression_0
+        name:string "is a type of" sp cls:token  block:expression? {
+            def evaluate_in(context)
+                #print "---------------defining #{name.value.inspect}--------------\n"
+                rule = cls.value.to_nice_ident
+                sub_type = name.evaluate_in(context).strip
+                sub_type_g = A_grammar_pattern.new(sub_type)
+                context.extend_grammar_rule("type_of_#{sub_type.to_nice_ident}",sub_type_g.to_s)
+                context.extend_grammar_rule("type_of_#{rule}","type_of_#{sub_type.to_nice_ident}")
+                context.extend_grammar_rule(rule,"#{sub_type.to_nice_ident} sp",%Q{
+                    #print "sbtyp: \#{text_value.strip}\\n"
+                    elements[0].evaluate_in(context)
+                    }.indent(-12))
+                context.extend_grammar_rule(sub_type.to_nice_ident,"variable")
+                block.evaluate_in(context)
+                nil
+                end
+            } /
+        name:string "is a" "n"?    sp cls:(main:expression sub:("," sp cl:expression)*) block:expression? {
+            def evaluate_in(context)
+                #print "---------------defining #{name.value.inspect}--------------\n"
+                #print "    #{cls.main.evaluate_in(context).inspect}\n"
+                #print "    #{cls.sub.elements.collect {|x| x.cl.evaluate_in(context)}.inspect}\n"
+                #print "    #{block.value[0..40].inspect} (+#{block.value.length-41} more)\n"
+                item_name = name.evaluate_in(context).strip
+                ([cls.main.evaluate_in(context)] + cls.sub.elements.collect {|x| x.cl.evaluate_in(context)}).each { |cls|
+                    rule = cls.to_nice_ident
+                    context[item_name] = if ["action","finite_automata"].include? rule
+                        block
+                      else
+                        x = OpenStruct.new(:name => "#{item_name} (#{rule})")
+                        def x.to_s; name; end;
+                        def x.picture; looks_like || super; end;
+                        def x.to_str; to_s; end;
+                        old,context[:current_item] = context[:current_item],x
+                        block.evaluate_in(context) if block
+                        context[:current_item] = old
+                        x
+                      end
+                    pattern = A_grammar_pattern.new(item_name)
+                    context.extend_grammar_rule(rule,pattern.to_s,case rule
+                      when 'action'          then %Q{
+                        c = A_context.new.within(context).update(
+                            #{([':outer_scope => context']+pattern.vars.collect {|v| ":#{v} => #{v}.evaluate_in(context)"}).join(",\n").indented(20)}
+                            )
+                        #print '>>',#{item_name.inspect},"\\n"
+                        r = context[#{item_name.inspect}].evaluate_in(c).last
+                        #print '<<',#{item_name.inspect}," --> \#{r.inspect} \\n"
+                        #r
+                        }.remove_blank_lines.indent(-16)
+                      when 'place'           then %Q{context.places[#{item_name.inspect}] ||= A_place.new(#{item_name.inspect})}
+                      when 'substance'       then %Q{:#{item_name.inspect}}
+                      when 'finite_automata' then %Q{context.execute_f_a(context.parse_and_evaluate(context[#{item_name.inspect}].nested_text))}
+                      else                        %Q{context[#{item_name.inspect}]}
+                      end)
+                    }
+                nil
+                end
+            } /
+        name:string "means"        sp expansion:expression {
+            def evaluate_in(context)
+                #print "---------------defining #{name.value.inspect}--------------\n"
+                item_name = name.evaluate_in(context).strip
+                context[item_name] = expansion
+                context.extend_grammar_rule("expression_0",item_name.inspect,%Q{context[#{item_name.inspect}].evaluate_in(context)})
+                nil
+                end
+            } /
+        "looks like" sp string {
+            def evaluate_in(context)
+                context[:current_item].looks_like = string.evaluate_in(context)
+                end
+            } /
+        "put" sp item:expression preposition? container:expression {
+            def evaluate_in(context)
+                c = container.evaluate_in(context)
+                raise Exception,"Now where would that be lad?" unless c
+                c = c.first while c.length == 1 and c.first.is_a? Array
+                #print "c = #{c.class}: #{c.inspect}\n"
+                raise Exception,"Now where would that be lad?" unless c
+                c << item.evaluate_in(context)
+                end
+            } /
+        "uppermost thing" sp place {
+            def evaluate_in(context)
+                place.evaluate_in(context)[-1]
+                end
+            } /
+        "uppermost thing taken" sp place {
+            def evaluate_in(context)
+                place.evaluate_in(context).pop
+                end
+            } /
+        "by thunder," sp objection:expression_4 {
+            def evaluate_in(context)
+                raise Exception,objection.evaluate_in(context).to_s
+                end
+            } /
+        "there be" sp no:"no'"? sp ml:("more"/"less") sp container1:expression "than" sp container2:expression {
+            def evaluate_in(context)
+                c1 = [container1.evaluate_in(context)].flatten.length
+                c2 = [container2.evaluate_in(context)].flatten.length
+                #print "c1 = #{c1}    c2 = #{c2} \n"
+                case "#{no.text_value} #{ml.text_value}"
+                  when "no' more" then c1 <= c2
+                  when "no' less" then c1 >= c2
+                  when    " more" then c1 >  c2
+                  when    " less" then c1 <  c2
+                  else "#{no.text_value} #{ml.text_value}".inspect
+                  end
+                end
+            } /
+        #action (pattern) (expansion)
+        place "be" sp condition:("no"? sp ("more"/"less") sp ("'n"/"than")) sp integer "feet" sp dir:("deep"/"high") {
+            def evaluate_in(context)
+                d = ([place.evaluate_in(context)].flatten.length-4)*2
+                i = integer.evaluate_in(context)
+                #print "#{d} :: #{i}\n"
+                d = -d if dir.text_value =~ /deep/
+                r = (condition.text_value =~ /more/) ? (d>i) : (d<i)
+                r = !r if condition.text_value =~ /no/
+                r
+                end
+            } /
+        thing "taken" sp preposition place:expression {
+            def evaluate_in(context)
+                place.evaluate_in(context).delete(thing.evaluate_in(context))
+                end
+            } /
+        #first (var) of (collection) where (condition)
+        #(object) is/isn't burried
+        # -- change to hands?
+        thing sp "is" sp place /
+        "take on" sp filename:string {
+            def evaluate_in(context)
+                context.parse_and_evaluate(File.read(filename.evaluate_in(context)))
+                "Affy Davey"
+                rescue Object => msg
+                  "Belay that order!\n#{msg}"
+                end
+            } /
+        "in states characterized by" sp guards:expression "I shall" sp action:expression {
+            def evaluate_in(context)
+                [guards.nested_text.split("\n",-1),action]
+                end
+            } /
+        "cast off!" {
+            def evaluate_in(context)
+                $done = true
+                "Time 't weight anchor."
+                end
+            } /
+        string /
+        "spread the chart" {
+            def evaluate_in(context)
+                print "Here's the situation:\n\n#{$all_places.to_s.indent(4)}\n"
+                end
+            } /
+        obj:pirate "is"  sp place /
+        obj:pirate "has" sp expression { 
+            def evaluate_in(context)
+                context.inventory += expression.evaluate_in(context) - ['a ','an ']
+                end
+            } /
+        obj:pirate ","   sp action {
+            def evaluate_in(context)
+                action.evaluate_in(context)
+                end
+            } /
+        "inventory" sp {
+            def evaluate_in(context)
+                context.inventory
+                end
+            } /
+        preposition? "location of" sp thing:expression {
+            def evaluate_in(context)
+                x = thing.evaluate_in(context)
+                $all_places.find { |p| p.last == x }
+                end
+            } /
+        thing /
+        type_of_thing /
+        "the place called " place /
+        "the pirate called " pirate /
+        "raise bloody hell!" { 
+            def evaluate_in(context)
+                $bloody_hell = true
+                end 
+            } /
+        "mutter" { 
+            def evaluate_in(context)
+                $mutter = true
+                end 
+            } /
+        "help" {
+            def evaluate_in(context)
+                print %q{Yer too late fer that, matey, there's no help'n you now!  H'ar h'ar h'ar!}
+                end
+            } /
+        "watch" sp b:expression? { 
+            def evaluate_in(context)
+                if b
+                    x = $watch
+                    $watch = true
+                    result = b.evaluate_in(context)
+                    $watch = x
+                    result
+                  else
+                    $watch = true
+                  end
+                end 
+            } /
+        super
+        end
+    rule stack_dump    super        end
+    rule thing
+        place /
+        variable
+        end
+    rule type_of_thing
+        "thing" sp /
+        type_of_place
+        end
+    rule type_of_place
+        "place" sp
+        end
+    rule place
+        preposition place { def evaluate_in(context); place.evaluate_in(context); end } /
+        variable
+        end
+    rule action
+        "drink rum" {
+            def evaluate_in(context)
+                $env.inebriation += 1
+                ["Aye, that ah will."]
+                end
+            } /
+        variable
+        end
+    rule variable
+        '?' token {
+            def evaluate_in(context)
+                token.evaluate_in(context)
+                end
+            }
+        end
+    rule string
+        '"' (!["\n] .)* '"' sp { 
+            def evaluate_in(context)
+                elements[1].text_value.gsub(/[{]([^{}]*)[}]/) { context.parse_and_evaluate($1).collect {|x| x.pirate_name}.join(', ') }
+                end 
+            }
+        end
+    rule pirate
+        "scurvy Matt" sp
+        end
+    rule preposition
+        (("in" "to"?/"out"/"on" "to"?/"off"/"to"/"from"/"athwart"/"abaft"/"of"/"top") " " sp)+
+        end
+    rule article
+        ("a" / "the" / "me" / "yon" / "that" / "th'") sp
+        end
+    rule bilge_water
+        (!'bilge water' ( unopened_block / !"\n" .) sp)* 
+        "bilge" sp "water" sp
+        (( unopened_block / !"\n" .) sp)* 
+        "\n" 
+        { def evaluate_in(context); nil; end; }
+        end
+    end
+
+grammar G2
+    include G1
+    rule top
+        super
+        end
+    rule type_of_tool
+        "tool" sp
+        end
+    end
+
+grammar G3
+    include G2
+    rule top
+        super
+        end
+    rule type_of_thing
+        type_of_tool
+        / super
+        end
+    end
+
+grammar G4
+    include G3
+    rule top
+        super
+        end
+    rule thing
+        tool sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G5
+    include G4
+    rule top
+        super
+        end
+    rule tool
+        variable
+        end
+    end
+
+grammar G6
+    include G5
+    rule top
+        super
+        end
+    rule type_of_booty
+        "booty" sp
+        end
+    end
+
+grammar G7
+    include G6
+    rule top
+        super
+        end
+    rule type_of_thing
+        type_of_booty
+        / super
+        end
+    end
+
+grammar G8
+    include G7
+    rule top
+        super
+        end
+    rule thing
+        booty sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G9
+    include G8
+    rule top
+        super
+        end
+    rule booty
+        variable
+        end
+    end
+
+grammar G10
+    include G9
+    rule top
+        super
+        end
+    rule type_of_substance
+        "substance" sp
+        end
+    end
+
+grammar G11
+    include G10
+    rule top
+        super
+        end
+    rule type_of_thing
+        type_of_substance
+        / super
+        end
+    end
+
+grammar G12
+    include G11
+    rule top
+        super
+        end
+    rule thing
+        substance sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G13
+    include G12
+    rule top
+        super
+        end
+    rule substance
+        variable
+        end
+    end
+
+grammar G14
+    include G13
+    rule top
+        super
+        end
+    rule type_of_actor
+        "actor" sp
+        end
+    end
+
+grammar G15
+    include G14
+    rule top
+        super
+        end
+    rule type_of_thing
+        type_of_actor
+        / super
+        end
+    end
+
+grammar G16
+    include G15
+    rule top
+        super
+        end
+    rule thing
+        actor sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G17
+    include G16
+    rule top
+        super
+        end
+    rule actor
+        variable
+        end
+    end
+
+grammar G18
+    include G17
+    rule top
+        super
+        end
+    rule type_of_action
+        "action" sp
+        end
+    end
+
+grammar G19
+    include G18
+    rule top
+        super
+        end
+    rule type_of_thing
+        type_of_action
+        / super
+        end
+    end
+
+grammar G20
+    include G19
+    rule top
+        super
+        end
+    rule thing
+        action sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G21
+    include G20
+    rule top
+        super
+        end
+    rule action
+        variable
+        / super
+        end
+    end
+
+grammar G22
+    include G21
+    rule top
+        super
+        end
+    rule type_of_finite_automata
+        "finite automata" sp
+        end
+    end
+
+grammar G23
+    include G22
+    rule top
+        super
+        end
+    rule type_of_action
+        type_of_finite_automata
+        / super
+        end
+    end
+
+grammar G24
+    include G23
+    rule top
+        super
+        end
+    rule action
+        finite_automata sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G25
+    include G24
+    rule top
+        super
+        end
+    rule finite_automata
+        variable
+        end
+    end
+
+grammar G26
+    include G25
+    rule top
+        super
+        end
+    rule type_of_pirate
+        "pirate" sp
+        end
+    end
+
+grammar G27
+    include G26
+    rule top
+        super
+        end
+    rule type_of_actor
+        type_of_pirate
+        / super
+        end
+    end
+
+grammar G28
+    include G27
+    rule top
+        super
+        end
+    rule actor
+        pirate sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G29
+    include G28
+    rule top
+        super
+        end
+    rule pirate
+        variable
+        / super
+        end
+    end
+
+grammar G30
+    include G29
+    rule top
+        super
+        end
+    rule booty
+        "treasure chest" sp {
+            def evaluate_in(context)
+                context["treasure chest"]
+                end
+            }
+        / super
+        end
+    end
+
+grammar G31
+    include G30
+    rule top
+        super
+        end
+    rule expression_0
+        "me hands" {
+            def evaluate_in(context)
+                context["me hands"].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G32
+    include G31
+    rule top
+        super
+        end
+    rule type_of_small_island
+        "small island" sp
+        end
+    end
+
+grammar G33
+    include G32
+    rule top
+        super
+        end
+    rule type_of_place
+        type_of_small_island
+        / super
+        end
+    end
+
+grammar G34
+    include G33
+    rule top
+        super
+        end
+    rule place
+        small_island sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G35
+    include G34
+    rule top
+        super
+        end
+    rule small_island
+        variable
+        end
+    end
+
+grammar G36
+    include G35
+    rule top
+        super
+        end
+    rule place
+        "aside me" sp {
+            def evaluate_in(context)
+                context.places["aside me"] ||= A_place.new("aside me")
+                end
+            }
+        / super
+        end
+    end
+
+grammar G37
+    include G36
+    rule top
+        super
+        end
+    rule substance
+        "sand" sp {
+            def evaluate_in(context)
+                :"sand"
+                end
+            }
+        / super
+        end
+    end
+
+grammar G38
+    include G37
+    rule top
+        super
+        end
+    rule substance
+        "rock" sp {
+            def evaluate_in(context)
+                :"rock"
+                end
+            }
+        / super
+        end
+    end
+
+grammar G39
+    include G38
+    rule top
+        super
+        end
+    rule expression_0
+        "(object) is visible" {
+            def evaluate_in(context)
+                context["(object) is visible"].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G40
+    include G39
+    rule top
+        super
+        end
+    rule expression_0
+        "location of (object)" {
+            def evaluate_in(context)
+                context["location of (object)"].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G41
+    include G40
+    rule top
+        super
+        end
+    rule action
+        "drop" sp object:expression {
+            def evaluate_in(context)
+                c = A_context.new.within(context).update(
+                    :outer_scope => context,
+                    :object => object.evaluate_in(context)
+                    )
+                #print '>>',"drop (object)","\n"
+                r = context["drop (object)"].evaluate_in(c).last
+                #print '<<',"drop (object)"," --> #{r.inspect} \n"
+                #r
+                end
+            }
+        / super
+        end
+    end
+
+grammar G42
+    include G41
+    rule top
+        super
+        end
+    rule action
+        "drop" sp object:expression "" sp place:expression {
+            def evaluate_in(context)
+                c = A_context.new.within(context).update(
+                    :outer_scope => context,
+                    :object => object.evaluate_in(context),
+                    :place => place.evaluate_in(context)
+                    )
+                #print '>>',"drop (object) (place)","\n"
+                r = context["drop (object) (place)"].evaluate_in(c).last
+                #print '<<',"drop (object) (place)"," --> #{r.inspect} \n"
+                #r
+                end
+            }
+        / super
+        end
+    end
+
+grammar G43
+    include G42
+    rule top
+        super
+        end
+    rule action
+        "pick up" sp object:expression {
+            def evaluate_in(context)
+                c = A_context.new.within(context).update(
+                    :outer_scope => context,
+                    :object => object.evaluate_in(context)
+                    )
+                #print '>>',"pick up (object)","\n"
+                r = context["pick up (object)"].evaluate_in(c).last
+                #print '<<',"pick up (object)"," --> #{r.inspect} \n"
+                #r
+                end
+            }
+        / super
+        end
+    end
+
+grammar G44
+    include G43
+    rule top
+        super
+        end
+    rule type_of_where_a_hole_can_be_dug
+        "where a hole can be dug" sp
+        end
+    end
+
+grammar G45
+    include G44
+    rule top
+        super
+        end
+    rule type_of_place
+        type_of_where_a_hole_can_be_dug
+        / super
+        end
+    end
+
+grammar G46
+    include G45
+    rule top
+        super
+        end
+    rule place
+        where_a_hole_can_be_dug sp {
+            def evaluate_in(context)
+                #print "sbtyp: #{text_value.strip}\n"
+                elements[0].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G47
+    include G46
+    rule top
+        super
+        end
+    rule where_a_hole_can_be_dug
+        variable
+        end
+    end
+
+grammar G48
+    include G47
+    rule top
+        super
+        end
+    rule place
+        "me hole" sp {
+            def evaluate_in(context)
+                context.places["me hole"] ||= A_place.new("me hole")
+                end
+            }
+        / super
+        end
+    end
+
+grammar G49
+    include G48
+    rule top
+        super
+        end
+    rule place
+        "me pile o' sand" sp {
+            def evaluate_in(context)
+                context.places["me pile o' sand"] ||= A_place.new("me pile o' sand")
+                end
+            }
+        / super
+        end
+    end
+
+grammar G50
+    include G49
+    rule top
+        super
+        end
+    rule tool
+        "shovel" sp {
+            def evaluate_in(context)
+                context["shovel"]
+                end
+            }
+        / super
+        end
+    end
+
+grammar G51
+    include G50
+    rule top
+        super
+        end
+    rule expression_0
+        "(object) is visible" {
+            def evaluate_in(context)
+                context["(object) is visible"].evaluate_in(context)
+                end
+            }
+        / super
+        end
+    end
+
+grammar G52
+    include G51
+    rule top
+        super
+        end
+    rule action
+        "dig" sp {
+            def evaluate_in(context)
+                c = A_context.new.within(context).update(
+                    :outer_scope => context
+                    )
+                #print '>>',"dig","\n"
+                r = context["dig"].evaluate_in(c).last
+                #print '<<',"dig"," --> #{r.inspect} \n"
+                #r
+                end
+            }
+        / super
+        end
+    end
+
+grammar G53
+    include G52
+    rule top
+        super
+        end
+    rule action
+        "kick sand" sp {
+            def evaluate_in(context)
+                c = A_context.new.within(context).update(
+                    :outer_scope => context
+                    )
+                #print '>>',"kick sand","\n"
+                r = context["kick sand"].evaluate_in(c).last
+                #print '<<',"kick sand"," --> #{r.inspect} \n"
+                #r
+                end
+            }
+        / super
+        end
+    end
+
+grammar G54
+    include G53
+    rule top
+        super
+        end
+    rule small_island
+        "treasure island" sp {
+            def evaluate_in(context)
+                context["treasure island"]
+                end
+            }
+        / super
+        end
+    end
+
+grammar G55
+    include G54
+    rule top
+        super
+        end
+    rule where_a_hole_can_be_dug
+        "treasure island" sp {
+            def evaluate_in(context)
+                context["treasure island"]
+                end
+            }
+        / super
+        end
+    end
+
+grammar G56
+    include G55
+    rule top
+        super
+        end
+    rule finite_automata
+        "bury treasure" sp {
+            def evaluate_in(context)
+                context.execute_f_a(context.parse_and_evaluate(context["bury treasure"].nested_text))
+                end
+            }
+        / super
+        end
+    end
+
+grammar G57
+    include G56
+    rule top
+        super
+        end
+    rule pirate
+        "scurvy Matt" sp {
+            def evaluate_in(context)
+                context["scurvy Matt"]
+                end
+            }
+        / super
+        end
+    end
+

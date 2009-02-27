@@ -1,0 +1,49 @@
+
+take on "treasure_island"
+
+"scurvy Matt" is a pirate
+    "bury treasure" is a finite automata
+        in states characterized by
+            me hole be less'n 6 feet deep
+            treasure chest be in me hands
+          I shall
+            drop treasure chest aside me
+        in states characterized by
+            treasure chest be aside me
+            me hole be less'n 6 feet deep
+          I shall
+            dig
+        in states characterized by
+            treasure chest be aside me
+            me hole be no less'n 6 feet deep
+          I shall 
+            pick up treasure chest
+        in states characterized by
+            treasure chest be in me hands
+            me hole be no less'n 6 feet deep
+          I shall 
+            drop treasure chest in me hole
+        in states characterized by
+            treasure chest be in me hole
+            there be more in me pile o' sand than in me hole
+          I shall
+            kick sand
+        in states characterized by
+            treasure chest be in me hole
+            there be no' more in me pile o' sand than in me hole
+          I shall 
+            cast off!
+
+aside me
+scurvy Matt is on treasure island
+scurvy Matt has 
+    a shovel
+    a treasure chest
+in me hole
+on me pile o' sand
+
+spread the chart
+
+scurvy Matt, bury treasure
+
+spread the chart

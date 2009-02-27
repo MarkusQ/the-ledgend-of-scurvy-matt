@@ -1,0 +1,49 @@
+"tool" is a type of thing
+"booty" is a type of thing
+"substance" is a type of thing
+"actor" is a type of thing
+"action" is a type of thing
+"finite automata" is a type of action
+"pirate" is a type of actor
+"treasure chest" is a booty
+    looks like "[$$]"
+"me hands" means inventory
+"small island" is a type of place
+    "aside me" is a place
+    "sand" is a substance
+    "rock" is a substance
+    "(object) is visible" means true
+    "location of (object)" means
+        first place of places here where place contains object and object is visible
+    bilge water "drop (object=treasure chest) (place=places_here.random)" is an action
+    "drop (object)" is an action
+        drop ?object aside me
+    "drop (object) (place)" is an action
+        by thunder, "ah ain't hold'n me {object}!" lest inventory contains object
+        put ?object taken from inventory in place
+        "Dropped me {object} 'n {place}"
+    "pick up (object)" is an action
+        by thunder, "ah'm already hold'n me {object}!" if'n inventory contains object
+        place = location of object
+        by thunder, "ah don't see me {object} here!"   lest place
+        put ?object taken from place into inventory
+        "Pick'd up me {object}"
+"where a hole can be dug" is a type of place
+    "me hole" is a place
+    "me pile o' sand" is a place
+    "shovel" is a tool
+        looks like "==D"
+    "(object) is visible" means object isn't buried
+    "dig" is an action
+        by thunder, "ah can't dig without me shovel!"                     lest inventory contains shovel
+        by thunder, "ah can't dig with me treasure in me hands!"          if'n inventory contains treasure chest
+        by thunder, "ah can't dig through {uppermost thing in me hole}!"  lest uppermost thing in me hole be sand
+        by thunder, "ah can't dig with {uppermost thing on me pile o' sand} on me pile!" lest  uppermost thing on me pile o' sand be sand
+        put uppermost thing taken from in me hole onto on me pile o' sand
+        "Digg'n's for landlubbers, ah tell ye!"
+    "kick sand" is an action
+        by thunder, "the bloody hole is full!"                              lest there be less in me hole than on me pile o' sand
+        by thunder, "th'scurvey {uppermost thing in me pile} is in me way!" lest uppermost thing on me pile'o sand is sand
+        put uppermost thing taken from on me pile o' sand into in me hole
+        "Kick'd some sand in'a hole."
+"treasure island" is a small island, where a hole can be dug

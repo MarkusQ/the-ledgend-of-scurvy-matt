@@ -1,0 +1,96 @@
+grammar SalientStructure
+    rule top
+        expression "\n"* <WrapFirst> / "\n"+
+        end
+    rule expressions
+        expression+ { def value; elements.collect { |x| x.value }; end }
+        end
+    rule expression
+        expression_9
+        end
+    rule expression_9
+        expression_8 ((
+             '<' / '>' / '<=' / '>=' /
+             '='  {def apply(a,b); [a,'=',b]; end} /
+             '<-' {def apply(a,b); [a,'<-',b]; end}
+           ) sp expression_8)* <LeftAssociative>
+        end
+    rule expression_8
+        expression_7 (!. sp expression_7)* <LeftAssociative>
+        end
+    rule expression_7
+        expression_6 (!. sp expression_6)* <LeftAssociative>
+        end
+    rule expression_6
+        expression_5 (!. sp expression_5)* <LeftAssociative>
+        end
+    rule expression_5
+        expression_4 (!. sp expression_4)* <LeftAssociative>
+        end
+    rule expression_4
+        expression_3 (!. sp expression_3)* <LeftAssociative>
+        end
+    rule expression_3
+        expression_2 (!. sp expression_2)* <LeftAssociative>
+        end
+    rule expression_2
+        expression_1 ([+-] sp expression_1)* <LeftAssociative>
+        end
+    rule expression_1
+        expression_0 ([*/] sp expression_0)* <LeftAssociative>
+        end
+    rule expression_0
+        unopened_block /
+        if_expression /
+        "(" sp sub:expression ")" sp {def evaluate_in(context); sub.evaluate_in(context); end}/
+        "[" sp xs:expressions "]" sp {def evaluate_in(context); xs.elements.collect { |x| x.evaluate_in(context) }; end}/
+        integer /
+        token sp #( "(" sp expressions ")" sp / "[" sp expressions "]" sp / ("'s"/[.]) sp expression )*
+        end
+    rule if_expression
+        "if" sp c:expression "then" sp t:expression "else" sp e:expression {
+            def evaluate_in(context)
+                c.evaluate_in(context) ? t.evaluate_in(context) : e.evaluate_in(context)
+                end
+            } /
+        "if" sp c:expression t:expression sp "else" e:expression {
+            def evaluate_in(context)
+                c.evaluate_in(context) ? t.evaluate_in(context) : e.evaluate_in(context)
+                end
+            }
+        end
+    rule unopened_block
+        block_lines:("\n    " rest_of_line)+ sp {
+            def nested_text
+                block_lines.elements.collect { |bl| bl.rest_of_line.value }.join("\n")
+                end
+            def value
+                [[nested_text]]
+                end
+            def evaluate_in(context)
+                #print "Evaluating #{nested_text.inspect}\n"
+                context.parse_and_evaluate(nested_text)
+                end
+            }
+        end
+    rule token
+        [a-z] ['a-z0-9_]* [!?]* sp
+        end
+    rule rest_of_line
+        (![\n] .)+ &([\n] / !.) {
+            def value
+                text_value
+                end
+            }
+        end
+    rule integer
+        ' '* digits:('-'? [0-9]+) sp {
+            def value
+                digits.text_value.to_i
+                end
+            }
+        end
+    rule sp
+        ' '* ("\n  " !" ")?
+        end
+    end
