@@ -313,6 +313,7 @@ class A_context < Hash
                     raise if $bloody_hell
                     return(result << x)
                   end
+                return result if result.flatten.last.is_a? Exception
               else
                 if p.failure_reason =~ /byte (\d+)/
                     print text[$1.to_i-1,10].inspect,"\n"
